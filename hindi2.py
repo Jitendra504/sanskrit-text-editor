@@ -11,11 +11,11 @@ BASE_CONSONANTS = {
     'z': 'ऋ_BASE' 
 }
 
-# 2. INDEPENDENT VOWELS (SWARS) - To protect from matra stacking
+# 2. INDEPENDENT VOWELS (SWARS)
 SWARS = {'अ', 'आ', 'इ', 'ई', 'उ', 'ऊ', 'ए', 'ऐ', 'ओ', 'औ', 'ऋ', 'ॠ'}
 
 GLYPH_LOGIC = {
-    # Transformation Cycles (Aspiration & Flaps)
+    # Transformation Cycles
     ('क', 'f'): 'ख', ('ख', 'f'): 'क',
     ('ग', 'f'): 'घ', ('घ', 'f'): 'ग',
     ('च', 'f'): 'छ', ('छ', 'f'): 'च',
@@ -39,9 +39,9 @@ GLYPH_LOGIC = {
     (None, 'e'): 'ए', (None, 'o'): 'ओ',
     (None, 'z'): 'ऋ', ('ऋ', 'z'): 'ॠ',
     
-    # Vriddhi Redesign (Muscle Memory ae/ao)
-    ('अ', 'e'): 'ऐ', ('अ', 'o'): 'औ',
-    ('ा', 'e'): 'ै', ('ा', 'o'): 'ौ',
+    # --- UNIFORM VRIDDHI LOGIC (a + i = ai, a + u = au) ---
+    ('अ', 'i'): 'ऐ', ('अ', 'u'): 'औ',
+    ('ा', 'i'): 'ै', ('ा', 'u'): 'ौ',
 
     # Base Matras
     ('CONSONANT', 'a'): 'ा', ('ा', 'a'): 'ा',
@@ -54,9 +54,9 @@ GLYPH_LOGIC = {
 
 MATRAS = {'ा', 'ि', 'ी', 'ु', 'ू', 'े', 'ै', 'ो', 'ौ', 'ृ', 'ॄ', '्'}
 
-class SanskritVriddhiEditor(Gtk.Window):
+class SanskritUniformEditor(Gtk.Window):
     def __init__(self):
-        Gtk.Window.__init__(self, title="Sanskrit Bare-Metal (Vriddhi Update)")
+        Gtk.Window.__init__(self, title="Sanskrit Bare-Metal (Uniform Base)")
         self.set_default_size(800, 500)
         self.textview = Gtk.TextView()
         self.textview.set_name("sanskrit_view")
@@ -75,7 +75,6 @@ class SanskritVriddhiEditor(Gtk.Window):
         buf = self.textview.get_buffer()
         is_shift = event.state & Gdk.ModifierType.SHIFT_MASK
 
-        # Standard Punctuation
         if keyname == "semicolon": buf.insert_at_cursor("ः"); return True
         if keyname == "comma": buf.insert_at_cursor("।"); return True
         if keyname == "period": char = 'ं'
@@ -86,7 +85,6 @@ class SanskritVriddhiEditor(Gtk.Window):
         cursor = buf.get_iter_at_mark(buf.get_insert())
         prev = ""
         
-        # GLYPH LOOKBACK (Nukta Fix)
         if cursor.get_offset() > 0:
             i1 = cursor.copy(); i1.backward_char()
             prev = buf.get_text(i1, cursor, True)
@@ -101,36 +99,45 @@ class SanskritVriddhiEditor(Gtk.Window):
                 buf.insert_at_cursor(GLYPH_LOGIC[(None, char)])
                 return True
 
-        # 2. SWAR-LOCK & VRIDDHI TRANSITIONS
+        # 2. SWAR-LOCK & VRIDDHI (prev is an independent Swar)
         if char in 'aiueozq':
-            # Block matras on standalone vowels
             if prev in SWARS:
-                if (prev, char) in GLYPH_LOGIC: # e.g. अ + e = ऐ
-                    buf.delete(i1, cursor)
-                    buf.insert_at_cursor(GLYPH_LOGIC[(prev, char)])
-                    return True
-                # Fallback to independent vowel instead of matra
-                if (None, char) in GLYPH_LOGIC:
-                    buf.insert_at_cursor(GLYPH_LOGIC[(None, char)])
-                    return True
-                return False
-
-            # Existing Matra logic (handles ae -> ai matra)
-            if prev in MATRAS:
+                # Check for direct transformations (अ+i=ऐ, अ+u=औ)
                 if (prev, char) in GLYPH_LOGIC:
                     buf.delete(i1, cursor)
                     buf.insert_at_cursor(GLYPH_LOGIC[(prev, char)])
                     return True
+                # If no transformation, insert as a new independent vowel (prevent stacking)
+                if (None, char) in GLYPH_LOGIC:
+                    buf.insert_at_cursor(GLYPH_LOGIC[(None, char)])
+                    return True
                 return False
+# 2. MATRA LOGIC (Handles ae -> ai matra AND standalone fallback)
+            if prev in MATRAS:
+                # If they combine (like a-matra + i = ai-matra)
+                if (prev, char) in GLYPH_LOGIC:
+                    buf.delete(i1, cursor)
+                    buf.insert_at_cursor(GLYPH_LOGIC[(prev, char)])
+                    return True
+                
+                # FALLBACK: If they don't combine, insert the Independent Swar
+                # This allows sequences like 'का' + 'इ' = 'काइ'
+                if (None, char) in GLYPH_LOGIC:
+                    buf.insert_at_cursor(GLYPH_LOGIC[(None, char)])
+                    return True
+                
+                return False
+ 
 
-        # 3. STANDARD TRANSFORMATION CYCLE (ड़, ढ, ख etc.)
+        # 3. TRANSFORMATION CYCLE
         if (prev, char) in GLYPH_LOGIC:
             buf.delete(i1, cursor)
             buf.insert_at_cursor(GLYPH_LOGIC[(prev, char)])
             return True
 
-        # 4. MATRA ATTACHMENT TO CONSONANTS
+        # 4. MATRA ATTACHMENT (Only if prev is a Consonant)
         if char in 'aiueozq':
+            # Identify consonants (Base or derived, but NOT standalone Swars)
             is_prev_cons = (prev in BASE_CONSONANTS.values() or 
                            (prev in GLYPH_LOGIC.values() and prev not in SWARS))
             if is_prev_cons:
@@ -152,5 +159,5 @@ class SanskritVriddhiEditor(Gtk.Window):
         return False
 
 if __name__ == "__main__":
-    win = SanskritVriddhiEditor()
+    win = SanskritUniformEditor()
     win.connect("destroy", Gtk.main_quit); win.show_all(); Gtk.main()
